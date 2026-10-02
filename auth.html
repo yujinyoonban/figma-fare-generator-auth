@@ -1,10 +1,171 @@
 <!doctype html>
-<html>
+<html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>Figma Fare Generator Auth</title>
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  >
+  <title>Figma Fare Generator Login</title>
 </head>
+
 <body>
-  Auth page ready
+  <p id="status">로그인을 준비하고 있습니다...</p>
+
+  <script type="module">
+    import {
+      createClient
+    } from "https://esm.sh/@supabase/supabase-js@2";
+
+    const SUPABASE_URL =
+      "https://eclobrzasfskvttqgpcl.supabase.co";
+
+    const SUPABASE_KEY =
+      "sb_publishable_LDrwGaAeNiKqkJpBGs9MBQ_h4TF5Ctc";
+
+    const FUNCTION_URL =
+      `${SUPABASE_URL}/functions/v1/figma-auth-callback`;
+
+    const AUTH_URL =
+      "https://yujinyoonban.github.io/figma-fare-generator-auth/auth.html";
+
+    const status =
+      document.getElementById("status");
+
+    const supabase = createClient(
+      SUPABASE_URL,
+      SUPABASE_KEY,
+      {
+        auth: {
+          flowType: "pkce",
+          persistSession: true,
+          detectSessionInUrl: false
+        }
+      }
+    );
+
+    const params =
+      new URLSearchParams(window.location.search);
+
+    const code =
+      params.get("code");
+
+    /*
+     * CALLBACK
+     * Figma 인증을 마치고 Supabase가
+     * ?code=... 로 돌려보낸 경우
+     */
+    if (code) {
+      status.textContent =
+        "로그인 정보를 확인하고 있습니다...";
+
+      const writeKey =
+        sessionStorage.getItem(
+          "figma-fare-generator-write-key"
+        );
+
+      if (!writeKey) {
+        status.textContent =
+          "로그인 요청 정보를 찾을 수 없습니다. 다시 로그인해 주세요.";
+      } else {
+        const { data, error } =
+          await supabase.auth.exchangeCodeForSession(code);
+
+        if (error || !data?.session) {
+          console.error(error);
+
+          status.textContent =
+            "로그인 처리에 실패했습니다: " +
+            (error?.message || "세션이 없습니다.");
+        } else {
+          const response = await fetch(
+            `${FUNCTION_URL}/complete`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                writeKey,
+                session: data.session
+              })
+            }
+          );
+
+          if (!response.ok) {
+            const result =
+              await response.text();
+
+            console.error(result);
+
+            status.textContent =
+              "로그인 세션 전달에 실패했습니다.";
+          } else {
+            sessionStorage.removeItem(
+              "figma-fare-generator-write-key"
+            );
+
+            window.history.replaceState(
+              {},
+              "",
+              AUTH_URL
+            );
+
+            status.innerHTML =
+              "<strong>Figma 로그인이 완료되었습니다.</strong>" +
+              "<br><br>" +
+              "이 창을 닫고 Figma로 돌아가 주세요.";
+          }
+        }
+      }
+    }
+
+    /*
+     * LOGIN START
+     * Edge Function이 발급한 write_key를 가지고
+     * 이 페이지에 처음 들어온 경우
+     */
+    else {
+      const writeKey =
+        params.get("write_key");
+
+      if (!writeKey) {
+        status.textContent =
+          "로그인 요청 정보가 없습니다.";
+      } else {
+        sessionStorage.setItem(
+          "figma-fare-generator-write-key",
+          writeKey
+        );
+
+        status.textContent =
+          "Figma 로그인 화면으로 이동하고 있습니다...";
+
+        const { data, error } =
+          await supabase.auth.signInWithOAuth({
+            provider: "figma",
+
+            options: {
+              redirectTo: AUTH_URL,
+              skipBrowserRedirect: true
+            }
+          });
+
+        if (error) {
+          console.error(error);
+
+          status.textContent =
+            "로그인 시작에 실패했습니다: " +
+            error.message;
+        } else if (data?.url) {
+          window.location.href =
+            data.url;
+        } else {
+          status.textContent =
+            "Figma 로그인 URL을 생성하지 못했습니다.";
+        }
+      }
+    }
+  </script>
 </body>
 </html>
